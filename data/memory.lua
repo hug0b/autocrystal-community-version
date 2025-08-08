@@ -51,25 +51,37 @@ local function RegisterROMHook(romAddr, action, name, onRead)
     if not romAddr then return end
     event.unregisterbyname(name)
     local address, bank = LinearAddressToBank(romAddr)
-    local execIfCorrectBank = function ()
-        --print(name .. " Address " .. bizstring.hex(address) .. " Bank " .. bizstring.hex(bank) .. " Current Bank " .. CurrentROMBank() .. " hROMBank " .. bizstring.hex(hROMBank))
+
+    -- Works with both old and new BizHawk; accepts params if provided
+    local function execIfCorrectBank(_, _, _)
+        -- console.log(name .. " Address " .. bizstring.hex(address) .. " Bank " .. bizstring.hex(bank) .. " Current Bank " .. CurrentROMBank() .. " hROMBank " .. bizstring.hex(hROMBank))
         if address < bankSizes.ROM or CurrentROMBank() == bank then
-            --print(name)
+            -- console.log(name)
             action()
         end
     end
+
+    -- Prefer new API (2.9+), fall back to deprecated names for older builds
     if onRead then
-        event.onmemoryread(execIfCorrectBank, address, name)
+        if event.on_bus_read then
+            event.on_bus_read(execIfCorrectBank, address, name)         -- new
+        else
+            event.onmemoryread(execIfCorrectBank, address, name)        -- old [deprecated]
+        end
     else
-        event.onmemoryexecute(execIfCorrectBank, address, name)
+        if event.on_bus_exec then
+            event.on_bus_exec(execIfCorrectBank, address, name)         -- new
+        else
+            event.onmemoryexecute(execIfCorrectBank, address, name)     -- old [deprecated]
+        end
     end
-    --print("Registered " .. name .. " on " .. bizstring.hex(romAddr) .. " (" .. bizstring.hex(bank) .. ":" .. bizstring.hex(address) .. ")")
+    -- console.log("Registered " .. name .. " on " .. bizstring.hex(romAddr) .. " (" .. bizstring.hex(bank) .. ":" .. bizstring.hex(address) .. ")")
 end
 
 local function SetRomBankAddress(addr)
     hROMBank = knownRomBankAddresses[addr] or addr
     if type(hROMBank) ~= "number" then
-        print("Unknown ROM Bank addr")
+        console.log("Unknown ROM Bank addr")
     end
 end
 
@@ -78,7 +90,6 @@ return {
     LinearAddressToBank = LinearAddressToBank,
     BankAddressToLinear = BankAddressToLinear,
     RegisterROMHook = RegisterROMHook,
-    RegisterDirectROMHook = RegisterDirectROMHook,
     CurrentROMBank = CurrentROMBank,
     SetRomBankAddress = SetRomBankAddress,
     BankSizes = bankSizes

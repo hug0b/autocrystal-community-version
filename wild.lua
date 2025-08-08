@@ -1,4 +1,5 @@
 Mem = require("/data/Memory")
+memory.usememorydomain("System Bus")
 
 local desired_species = -1
 local atkdef
@@ -32,6 +33,7 @@ framesInAction2 = 0
 framesPerAction2 = 1
 
 if version == 0x54 then
+     console.log("Crystal detected")
     if region == 0x44 or region == 0x46 or region == 0x49 or region == 0x53 then
         enemy_addr = 0xd20c
         LoadBattleMenuAddr = Mem.BankAddressToLinear(0x9, 0x4EF2)
@@ -107,12 +109,12 @@ end
 
 local have_battle_controls = false
 Mem.RegisterROMHook(LoadBattleMenuAddr, function()
-    print("Battle menu loaded")
+    console.log("Battle menu loaded")
     have_battle_controls = true
 end, "Detect Battle Menu")
 
 Mem.RegisterROMHook(EnemyWildmonInitialized, function()
-    print("combat started")
+    console.log("combat started")
     item = memory.readbyte(item_addr)
         atkdef = memory.readbyte(enemy_addr)
         spespc = memory.readbyte(enemy_addr + 1)
@@ -120,7 +122,7 @@ Mem.RegisterROMHook(EnemyWildmonInitialized, function()
         highestSpeSpc = math.max(highestSpeSpc, spespc)
         species = memory.readbyte(species_addr)
 
-    print(string.format("Atk: %d Def: %d Spe: %d Spc: %d", math.floor(atkdef/16), atkdef%16, math.floor(spespc/16), spespc%16))
+    console.log(string.format("Atk: %d Def: %d Spe: %d Spc: %d", math.floor(atkdef/16), atkdef%16, math.floor(spespc/16), spespc%16))
     
 end, "Tell Display Battle Started / sending data")
 
@@ -179,10 +181,25 @@ while true do
         end
 
     else
-        while memory.readbyte(dv_flag_addr) ~= 0x01 do
+        -- Fallback: wait until the enemy DV bytes appear to be initialized
+        -- (works regardless of exact ROM routine addresses)
+        local dv_ready = 0
+        local dv_timeout = 0
+        repeat
+            press_button("B")               -- clear any intro text
             emu.frameadvance()
-            press_button("B")
-        end
+            atkdef  = memory.readbyte(enemy_addr)
+            spespc  = memory.readbyte(enemy_addr + 1)
+            if (atkdef ~= 0 or spespc ~= 0) then
+                dv_ready = dv_ready + 1     -- see nonzero values two frames in a row
+            else
+                dv_ready = 0
+            end
+            dv_timeout = dv_timeout + 1
+        until dv_ready >= 2 or dv_timeout > 180
+
+        -- If our ROM hook fired, great; if not, proceed after the settle
+        have_battle_controls = have_battle_controls or true
 
 
 
@@ -196,31 +213,39 @@ while true do
         
         if shiny(atkdef, spespc) then
             shinyvalue = 1
-            print("Shiny found!!")
+            console.log("Shiny found!!")
             break
         end
 
      
     end
 
-    if memory.readbyte(species_addr) ~= 0 then
 
-        while not have_battle_controls do
-            emu.frameadvance()
-            currentActionIndex = 1
+    if memory.readbyte(species_addr) ~= 0 then
+        -- If the ROM hook didn't fire, fall back after ~2 seconds
+        if not have_battle_controls then
             press_button("B")
+            emu.frameadvance()
+            menu_wait = (menu_wait or 0) + 1
+            if menu_wait >= 120 then
+                have_battle_controls = true
+                console.log("Fallback: proceeding without battle-menu hook")
+            end
         end
 
-        local currentAction = actions[currentActionIndex]
+        if have_battle_controls then
+            -- reset the fallback counter for the next battle
+            menu_wait = 0
 
+        local currentAction = actions[currentActionIndex]
         press_button(currentAction)
 
         framesInAction = framesInAction + 1
-
-        if framesInAction >= framesPerAction then
-            framesInAction = 0
-            currentActionIndex = (currentActionIndex % #actions) + 1
-            emu.frameadvance()
+            if framesInAction >= framesPerAction then
+                framesInAction = 0
+                currentActionIndex = (currentActionIndex % #actions) + 1
+                emu.frameadvance()
+            end
         end
     end
 end
